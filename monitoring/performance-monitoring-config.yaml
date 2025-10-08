@@ -1,0 +1,515 @@
+# Performance Monitoring Enhancement Configuration
+# 
+# This file contains comprehensive performance monitoring setup for ADAF Dashboard
+# including Prometheus metrics, Grafana dashboards, and alerting rules.
+
+# =============================================================================
+# PROMETHEUS METRICS CONFIGURATION
+# =============================================================================
+
+# Application-specific performance metrics
+performance_metrics:
+  # Database Performance Metrics
+  database:
+    - name: adaf_db_query_duration_seconds
+      help: "Database query execution time in seconds"
+      type: histogram
+      buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0]
+      labels: [query_type, table, operation]
+      
+    - name: adaf_db_connections_active
+      help: "Number of active database connections"
+      type: gauge
+      labels: [pool, database]
+      
+    - name: adaf_db_slow_queries_total
+      help: "Total number of slow database queries"
+      type: counter
+      labels: [query_type, table]
+      
+    - name: adaf_db_connection_wait_seconds
+      help: "Time spent waiting for database connections"
+      type: histogram
+      buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5]
+      labels: [pool]
+
+  # Cache Performance Metrics  
+  cache:
+    - name: adaf_cache_operations_total
+      help: "Total cache operations by type and result"
+      type: counter
+      labels: [operation, result, cache_type]
+      
+    - name: adaf_cache_hit_ratio
+      help: "Cache hit ratio by cache type"
+      type: gauge
+      labels: [cache_type, key_pattern]
+      
+    - name: adaf_cache_memory_usage_bytes
+      help: "Cache memory usage in bytes"
+      type: gauge
+      labels: [cache_type, instance]
+      
+    - name: adaf_cache_operation_duration_seconds
+      help: "Cache operation duration in seconds"
+      type: histogram
+      buckets: [0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1]
+      labels: [operation, cache_type]
+
+  # API Performance Metrics
+  api:
+    - name: adaf_api_request_duration_seconds
+      help: "API request duration in seconds"
+      type: histogram
+      buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0]
+      labels: [method, endpoint, status_code, cache_status]
+      
+    - name: adaf_api_requests_total
+      help: "Total API requests"
+      type: counter
+      labels: [method, endpoint, status_code]
+      
+    - name: adaf_api_concurrent_requests
+      help: "Number of concurrent API requests"
+      type: gauge
+      labels: [endpoint]
+      
+    - name: adaf_api_rate_limit_hits_total
+      help: "Total API rate limit hits"
+      type: counter
+      labels: [user_tier, endpoint]
+
+  # Business Logic Metrics
+  business:
+    - name: adaf_strategy_calculation_duration_seconds
+      help: "Strategy calculation time in seconds"
+      type: histogram
+      buckets: [0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0]
+      labels: [strategy_type, symbol, complexity]
+      
+    - name: adaf_portfolio_updates_total
+      help: "Total portfolio updates"
+      type: counter
+      labels: [update_type, user_tier]
+      
+    - name: adaf_market_data_lag_seconds
+      help: "Market data lag in seconds"
+      type: histogram
+      buckets: [1, 5, 10, 30, 60, 300, 600]
+      labels: [symbol, provider, data_type]
+      
+    - name: adaf_report_generation_duration_seconds
+      help: "Report generation time in seconds"
+      type: histogram
+      buckets: [1, 5, 10, 30, 60, 120, 300, 600]
+      labels: [report_type, format]
+
+# =============================================================================
+# GRAFANA DASHBOARD CONFIGURATIONS
+# =============================================================================
+
+grafana_dashboards:
+  # Main Performance Overview Dashboard
+  performance_overview:
+    title: "ADAF Dashboard - Performance Overview"
+    description: "High-level performance metrics for ADAF Dashboard"
+    refresh: "30s"
+    time_range: "1h"
+    panels:
+      - title: "API Response Time (p95)"
+        type: "stat"
+        target: "histogram_quantile(0.95, rate(adaf_api_request_duration_seconds_bucket[5m]))"
+        thresholds:
+          - color: "green"
+            value: 0
+          - color: "yellow" 
+            value: 0.2
+          - color: "red"
+            value: 0.5
+            
+      - title: "Database Query Performance"
+        type: "graph"
+        targets:
+          - expr: "histogram_quantile(0.95, rate(adaf_db_query_duration_seconds_bucket[5m]))"
+            legend: "p95 Query Time"
+          - expr: "histogram_quantile(0.50, rate(adaf_db_query_duration_seconds_bucket[5m]))"
+            legend: "p50 Query Time"
+            
+      - title: "Cache Hit Rate"
+        type: "stat"
+        target: "avg(adaf_cache_hit_ratio) * 100"
+        unit: "percent"
+        thresholds:
+          - color: "red"
+            value: 0
+          - color: "yellow"
+            value: 70
+          - color: "green"
+            value: 85
+
+  # Database Performance Dashboard
+  database_performance:
+    title: "ADAF Dashboard - Database Performance"
+    refresh: "10s"
+    panels:
+      - title: "Query Performance by Type"
+        type: "heatmap"
+        target: "sum(rate(adaf_db_query_duration_seconds_bucket[5m])) by (le, query_type)"
+        
+      - title: "Slow Queries"
+        type: "table"
+        target: "topk(10, rate(adaf_db_slow_queries_total[5m]))"
+        
+      - title: "Connection Pool Usage"
+        type: "graph"
+        targets:
+          - expr: "adaf_db_connections_active"
+            legend: "Active Connections"
+          - expr: "adaf_db_connection_wait_seconds"
+            legend: "Connection Wait Time"
+
+  # Cache Performance Dashboard  
+  cache_performance:
+    title: "ADAF Dashboard - Cache Performance"
+    refresh: "30s"
+    panels:
+      - title: "Cache Hit Rates by Type"
+        type: "graph"
+        target: "adaf_cache_hit_ratio"
+        
+      - title: "Cache Operations Rate"
+        type: "graph"
+        target: "rate(adaf_cache_operations_total[5m])"
+        
+      - title: "Cache Memory Usage"
+        type: "graph"
+        target: "adaf_cache_memory_usage_bytes"
+
+# =============================================================================
+# ALERTING RULES CONFIGURATION
+# =============================================================================
+
+alert_rules:
+  # Performance Degradation Alerts
+  performance_alerts:
+    - alert: HighAPILatency
+      expr: histogram_quantile(0.95, rate(adaf_api_request_duration_seconds_bucket[5m])) > 0.5
+      for: 2m
+      labels:
+        severity: warning
+        service: adaf-dashboard
+        component: api
+      annotations:
+        summary: "High API latency detected"
+        description: "API p95 response time is {{ $value }}s, above 500ms threshold"
+        runbook_url: "http://runbooks.adaf.local/ALERT_API_5XX"
+        
+    - alert: CriticalAPILatency
+      expr: histogram_quantile(0.95, rate(adaf_api_request_duration_seconds_bucket[5m])) > 1.0
+      for: 1m
+      labels:
+        severity: critical
+        service: adaf-dashboard
+        component: api
+      annotations:
+        summary: "Critical API latency detected"
+        description: "API p95 response time is {{ $value }}s, above 1000ms critical threshold"
+        
+    - alert: DatabaseSlowQueries
+      expr: rate(adaf_db_slow_queries_total[5m]) > 0.1
+      for: 3m
+      labels:
+        severity: warning
+        service: adaf-dashboard
+        component: database
+      annotations:
+        summary: "High rate of slow database queries"
+        description: "Slow query rate is {{ $value }} queries/second"
+        
+    - alert: LowCacheHitRate
+      expr: avg(adaf_cache_hit_ratio) < 0.7
+      for: 5m
+      labels:
+        severity: warning
+        service: adaf-dashboard
+        component: cache
+      annotations:
+        summary: "Low cache hit rate"
+        description: "Cache hit rate is {{ $value | humanizePercentage }}, below 70% threshold"
+
+  # Resource Utilization Alerts
+  resource_alerts:
+    - alert: HighDatabaseConnections
+      expr: adaf_db_connections_active / adaf_db_connections_max > 0.8
+      for: 2m
+      labels:
+        severity: warning
+        service: adaf-dashboard
+        component: database
+      annotations:
+        summary: "High database connection usage"
+        description: "Database connection usage is {{ $value | humanizePercentage }}"
+        
+    - alert: CacheMemoryHigh
+      expr: adaf_cache_memory_usage_bytes / adaf_cache_memory_limit_bytes > 0.9
+      for: 1m
+      labels:
+        severity: critical
+        service: adaf-dashboard
+        component: cache
+      annotations:
+        summary: "High cache memory usage"
+        description: "Cache memory usage is {{ $value | humanizePercentage }}"
+
+  # Business Logic Performance Alerts
+  business_alerts:
+    - alert: SlowStrategyCalculation
+      expr: histogram_quantile(0.95, rate(adaf_strategy_calculation_duration_seconds_bucket[5m])) > 10
+      for: 2m
+      labels:
+        severity: warning
+        service: adaf-dashboard
+        component: strategy-engine
+      annotations:
+        summary: "Slow strategy calculations detected"
+        description: "Strategy calculation p95 time is {{ $value }}s"
+        
+    - alert: MarketDataLag
+      expr: histogram_quantile(0.95, rate(adaf_market_data_lag_seconds_bucket[5m])) > 60
+      for: 1m
+      labels:
+        severity: critical
+        service: adaf-dashboard
+        component: market-data
+      annotations:
+        summary: "High market data lag"
+        description: "Market data lag p95 is {{ $value }}s, above 60s threshold"
+
+# =============================================================================
+# PERFORMANCE MONITORING IMPLEMENTATION
+# =============================================================================
+
+monitoring_implementation:
+  # Metrics Collection Strategy
+  collection:
+    # High-frequency metrics (collected every second)
+    high_frequency:
+      - adaf_api_request_duration_seconds
+      - adaf_api_concurrent_requests
+      - adaf_cache_operations_total
+      - adaf_db_connections_active
+      
+    # Medium-frequency metrics (collected every 10 seconds)  
+    medium_frequency:
+      - adaf_db_query_duration_seconds
+      - adaf_cache_hit_ratio
+      - adaf_strategy_calculation_duration_seconds
+      
+    # Low-frequency metrics (collected every minute)
+    low_frequency:
+      - adaf_cache_memory_usage_bytes
+      - adaf_market_data_lag_seconds
+      - adaf_report_generation_duration_seconds
+
+  # Metric Retention Strategy
+  retention:
+    # Raw metrics retention
+    raw_data: "7d"  # 7 days of raw data
+    
+    # Aggregated metrics retention
+    aggregated:
+      "5m": "30d"   # 5-minute aggregates for 30 days
+      "1h": "90d"   # 1-hour aggregates for 90 days  
+      "1d": "2y"    # Daily aggregates for 2 years
+
+  # Performance Baselines
+  baselines:
+    api_response_time:
+      p50: "50ms"
+      p95: "200ms" 
+      p99: "500ms"
+      
+    database_query_time:
+      p50: "10ms"
+      p95: "50ms"
+      p99: "100ms"
+      
+    cache_hit_rate:
+      target: "85%"
+      warning_threshold: "70%"
+      critical_threshold: "50%"
+      
+    strategy_calculation_time:
+      simple_strategies: "100ms"
+      complex_strategies: "1000ms"
+      backtesting: "10000ms"
+
+# =============================================================================
+# OBSERVABILITY ENHANCEMENT
+# =============================================================================
+
+observability:
+  # Distributed Tracing Configuration
+  tracing:
+    service_name: "adaf-dashboard"
+    trace_endpoints:
+      - "/api/strategies/*"
+      - "/api/portfolio/*" 
+      - "/api/market-data/*"
+      - "/api/dashboard"
+      - "/api/reports/*"
+    
+    trace_sampling_rate: 0.1  # 10% sampling
+    
+    # Custom span attributes
+    custom_attributes:
+      - user_id
+      - session_id
+      - cache_status
+      - database_pool
+      - strategy_type
+
+  # Real User Monitoring (RUM)
+  rum:
+    # Core Web Vitals tracking
+    core_web_vitals:
+      - name: "Largest Contentful Paint (LCP)"
+        target: "<2.5s"
+        warning: ">2.5s"
+        
+      - name: "First Input Delay (FID)" 
+        target: "<100ms"
+        warning: ">100ms"
+        
+      - name: "Cumulative Layout Shift (CLS)"
+        target: "<0.1"
+        warning: ">0.1"
+    
+    # Custom business metrics
+    business_metrics:
+      - dashboard_load_time
+      - portfolio_interaction_time
+      - strategy_analysis_time
+      - report_generation_time
+
+  # Log Analysis and Correlation
+  log_analysis:
+    # Performance-related log patterns
+    patterns:
+      - pattern: "slow_query"
+        regex: "query took (\d+)ms"
+        threshold: 100
+        
+      - pattern: "cache_miss"
+        regex: "cache miss for key (.*)"
+        impact: "performance"
+        
+      - pattern: "rate_limit"
+        regex: "rate limit exceeded for user (.*)"
+        impact: "user_experience"
+
+# =============================================================================
+# AUTOMATED PERFORMANCE OPTIMIZATION
+# =============================================================================
+
+auto_optimization:
+  # Query Optimization Suggestions
+  query_optimization:
+    # Automatically suggest indexes for slow queries
+    suggest_indexes:
+      enabled: true
+      threshold: "100ms"  # Suggest indexes for queries slower than 100ms
+      frequency: "daily"  # Check daily
+      
+    # Automatic query plan analysis
+    query_plan_analysis:
+      enabled: true
+      threshold: "50ms"
+      report_frequency: "weekly"
+
+  # Cache Optimization
+  cache_optimization:
+    # Automatic cache warming
+    cache_warming:
+      enabled: true
+      triggers:
+        - "deployment"
+        - "cache_hit_rate_drop"
+        - "scheduled_daily"
+      
+    # Dynamic TTL adjustment
+    dynamic_ttl:
+      enabled: true
+      adjust_based_on:
+        - "access_frequency"
+        - "data_volatility"
+        - "system_load"
+
+  # Resource Scaling Recommendations  
+  scaling_recommendations:
+    # Database connection pool sizing
+    db_pool_sizing:
+      enabled: true
+      monitor_metrics:
+        - "connection_wait_time"
+        - "connection_utilization"
+      recommendation_frequency: "weekly"
+      
+    # Cache sizing recommendations
+    cache_sizing:
+      enabled: true
+      monitor_metrics:
+        - "memory_usage"
+        - "eviction_rate"
+        - "hit_rate"
+      recommendation_frequency: "daily"
+
+# =============================================================================
+# PERFORMANCE TESTING INTEGRATION
+# =============================================================================
+
+performance_testing_integration:
+  # Continuous Performance Testing
+  continuous_testing:
+    # Automated performance regression testing
+    regression_testing:
+      enabled: true
+      trigger_on:
+        - "deployment"
+        - "configuration_change"
+        - "scheduled_daily"
+      
+      test_scenarios:
+        - "load_test_light"    # Quick regression check
+        - "api_performance"    # API-focused testing
+        - "cache_performance"  # Cache efficiency testing
+      
+      failure_thresholds:
+        response_time_degradation: "20%"  # Fail if 20% slower
+        error_rate_increase: "0.5%"       # Fail if error rate increases by 0.5%
+        throughput_decrease: "15%"        # Fail if throughput drops by 15%
+
+  # Performance Comparison and Trending
+  performance_trending:
+    # Baseline comparison
+    baseline_comparison:
+      enabled: true
+      compare_against:
+        - "previous_version"
+        - "last_week_average"
+        - "historical_baseline"
+      
+      trend_analysis:
+        - "response_time_trend"
+        - "throughput_trend" 
+        - "error_rate_trend"
+        - "resource_usage_trend"
+
+    # Performance reporting
+    performance_reporting:
+      frequency: "weekly"
+      include_metrics:
+        - "performance_summary"
+        - "trend_analysis"
+        - "optimization_recommendations"
+        - "capacity_planning"

@@ -1,0 +1,19 @@
+name: Release Blue-Green (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      canary:
+        description: "Porcentaje inicial de canary (10/25/50)"
+        required: false
+        default: '10'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ejecutar deploy blue-green
+        run: |
+          chmod +x scripts/deploy-bluegreen.sh
+          ./scripts/deploy-bluegreen.sh --canary ${{ inputs.canary }}

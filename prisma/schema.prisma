@@ -1,0 +1,228 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Signal {
+  id          String   @id @default(cuid())
+  type        String   // 'news', 'onchain', 'social', 'price'
+  source      String   // 'RSS', 'DeFiLlama', 'Twitter', etc.
+  title       String
+  description String
+  severity    String   // 'low', 'medium', 'high', 'critical'
+  metadata    Json     // Datos específicos del tipo de señal
+  fingerprint String   @unique // Para prevenir duplicados
+  processed   Boolean  @default(false)
+  timestamp   DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relaciones
+  alerts        Alert[]
+  opportunities Opportunity[]
+
+  @@map("signals")
+}
+
+model Alert {
+  id          String   @id @default(cuid())
+  signalId    String
+  type        String   // 'security', 'liquidity', 'regulatory', 'market'
+  severity    String   // 'low', 'medium', 'high', 'critical'
+  title       String
+  description String
+  metadata    Json     // Datos adicionales específicos de la alerta
+  resolved    Boolean  @default(false)
+  resolvedAt  DateTime?
+  timestamp   DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relaciones
+  signal Signal @relation(fields: [signalId], references: [id])
+
+  @@map("alerts")
+}
+
+model Opportunity {
+  id          String   @id @default(cuid())
+  signalId    String
+  type        String   // 'arbitrage', 'yield', 'liquidation', 'governance'
+  confidence  Float    // 0.0 - 1.0
+  title       String
+  description String
+  metadata    Json     // Datos específicos de la oportunidad
+  status      String   @default("proposed") // proposed | approved | rejected
+  expired     Boolean  @default(false)
+  expiredAt   DateTime?
+  timestamp   DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relaciones
+  signal Signal @relation(fields: [signalId], references: [id])
+
+  @@map("opportunities")
+}
+
+// Reglas por agente con expr JSON (string)
+model Rule {
+  id        String   @id @default(cuid())
+  agentCode String   // p.ej. 'NM-1', 'OC-1', 'OP-X'
+  name      String
+  expr      String   // JSON.stringify(RuleExpr)
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([agentCode, createdAt])
+  @@map("rules")
+}
+
+// Guardrails centralizados
+model Limit {
+  key       String  @id
+  value     Float
+  notes     String?
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@map("limits")
+}
+
+// Auditoría de cambios
+model ChangeLog {
+  id       String   @id @default(cuid())
+  actor    String
+  entity   String
+  entityId String
+  field    String
+  old      Json
+  new      Json
+  at       DateTime @default(now())
+
+  @@index([entity, entityId, at])
+  @@map("change_logs")
+}
+
+model TVLData {
+  id        String   @id @default(cuid())
+  protocol  String
+  chain     String
+  tvl       Float
+  change24h Float?
+  change7d  Float?
+  change30d Float?
+  timestamp DateTime
+  createdAt DateTime @default(now())
+
+  @@unique([protocol, chain, timestamp])
+  @@map("tvl_data")
+}
+
+model NewsData {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  link        String   @unique
+  pubDate     DateTime
+  source      String
+  sentiment   Float?   // -1.0 to 1.0
+  keywords    String[] // Array de palabras clave
+  createdAt   DateTime @default(now())
+
+  @@map("news_data")
+}
+
+model PriceData {
+  id        String   @id @default(cuid())
+  symbol    String
+  exchange  String
+  price     Float
+  volume24h Float?
+  timestamp DateTime
+  createdAt DateTime @default(now())
+
+  @@unique([symbol, exchange, timestamp])
+  @@map("price_data")
+}
+
+// RBAC (Role-Based Access Control) Models
+model Role {
+  id    String @id @default(cuid())
+  name  String @unique // 'viewer' | 'analyst' | 'admin'
+  
+  users   User[]
+  apiKeys ApiKey[]
+  
+  @@map("roles")
+}
+
+model User {
+  id     String @id @default(cuid())
+  email  String @unique
+  roleId String
+  
+  role Role @relation(fields: [roleId], references: [id])
+  
+  @@index([email])
+  @@map("users")
+}
+
+model ApiKey {
+  id        String   @id @default(cuid())
+  tokenHash String   // Hash of the actual token (never store plaintext)
+  preview   String   // First 6-8 chars of token for identification
+  roleId    String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  createdBy String   // Who created this key
+  
+  role Role @relation(fields: [roleId], references: [id])
+  
+  @@index([tokenHash])
+  @@index([active])
+  @@map("api_keys")
+}
+
+// OP-X Execution Planning
+model ExecutionPlan {
+  id        String   @id @default(cuid())
+  oppId     String   @unique // FK to opportunities table
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  status    String   @default("draft") // 'draft'|'ready'|'live'|'paused'|'closed'
+  
+  // Sizing configuration
+  sizing    Json     // { notionalPctNAV: number, legs?: Array<{market:string, side:'BUY'|'SELL', qty:number, venue:string}> }
+  
+  // Risk management
+  risk      Json     // { sl?:{type:'price'|'time'|'var', value:number, unit:'%'|'usd'|'h'}, tp?:{...}, maxSlippagePct:number }
+  
+  // Task checklist
+  checklist Json     // Array<{id:string, title:string, done:boolean, owner:string}>
+  
+  // Role handoffs
+  handoffs  Json     // Array<{role:'Trading'|'Ops'|'Legal'|'RI', owner?:string, note?:string}>
+  
+  // Plan expiration
+  expiry    DateTime?
+  
+  // Evidence and artifacts
+  artifacts Json     // Array<{kind:'chart'|'calc'|'approval'|'screenshot'|'tx', url:string, addedAt:string}>
+  
+  // Additional notes
+  notes     String?
+  
+  @@index([oppId])
+  @@index([status, createdAt])
+  @@map("execution_plans")
+}

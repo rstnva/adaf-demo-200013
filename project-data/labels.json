@@ -1,0 +1,13 @@
+[
+  {"name":"epic","color":"5319e7","description":"Epic/Initiative"},
+  {"name":"slo","color":"0e8a16","description":"SLO/SLI related"},
+  {"name":"infra","color":"1d76db","description":"Infra/Platform"},
+  {"name":"security","color":"b60205","description":"Security"},
+  {"name":"observability","color":"0052cc","description":"Observability"},
+  {"name":"api","color":"fbca04","description":"API"},
+  {"name":"perf","color":"5319e7","description":"Performance"},
+  {"name":"drill","color":"c2e0c6","description":"Drills/Exercises"},
+  {"name":"docs","color":"d4c5f9","description":"Documentation"},
+  {"name":"webhooks","color":"bfdadc","description":"Webhooks"},
+  {"name":"automerge","color":"0e8a16","description":"Auto-merge eligible"}
+]

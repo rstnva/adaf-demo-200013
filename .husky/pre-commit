@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+
+# Run typecheck and tests, then lint-staged
+npm run precommit && npx lint-staged

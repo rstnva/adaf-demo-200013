@@ -1,0 +1,145 @@
+
+> adaf-dashboard@1.0.0 dev /home/parallels/Desktop/adaf-dashboard-pro
+> next dev --port 3005
+
+   ▲ Next.js 15.5.4
+   - Local:        http://localhost:3005
+   - Network:      http://10.211.55.3:3005
+   - Environments: .env.local, .env
+
+ ✓ Starting...
+ ✓ Ready in 1109ms
+ ○ Compiling /api/read/whoami ...
+ ✓ Compiled /api/read/whoami in 1307ms (396 modules)
+ GET /api/read/whoami 200 in 1450ms
+ ✓ Compiled /api/control/keys in 160ms (398 modules)
+ GET /api/control/keys 403 in 206ms
+ GET /api/control/keys 403 in 708ms
+ GET /api/read/whoami 200 in 657ms
+ GET /api/read/whoami 200 in 639ms
+ GET /api/control/keys 200 in 677ms
+ POST /api/control/keys 201 in 918ms
+ ✓ Compiled /api/actions/opx/approve in 227ms (400 modules)
+ POST /api/actions/opx/approve 403 in 281ms
+ GET /api/read/whoami 200 in 971ms
+ GET /api/read/whoami 200 in 13ms
+ GET /api/control/keys 403 in 14ms
+ POST /api/actions/opx/approve 403 in 13ms
+ ✓ Compiled /api/read/opx/list in 124ms (402 modules)
+ GET /api/read/opx/list?limit=1 500 in 181ms
+ GET /api/read/whoami 200 in 25ms
+ GET /api/read/whoami 200 in 19ms
+ GET /api/read/whoami 200 in 703ms
+ GET /api/read/whoami 200 in 895ms
+ GET /api/control/keys 403 in 13ms
+ GET /api/control/keys 200 in 686ms
+ POST /api/actions/opx/approve 403 in 14ms
+ POST /api/control/keys 201 in 894ms
+ GET /api/read/whoami 200 in 1098ms
+ ✓ Compiled /api/control/keys/disable in 177ms (402 modules)
+🔒 Disabled 1 API key(s) matching prefix: a03d7022
+ POST /api/control/keys/disable 200 in 949ms
+ ✓ Compiled /api/read/opx/list in 63ms (210 modules)
+ GET /api/read/opx/list?limit=1 500 in 125ms
+ ✓ Compiled /api/read/dqp/overview in 133ms (408 modules)
+DQP overview error: Error [PrismaClientKnownRequestError]: 
+Invalid `prisma.$queryRawUnsafe()` invocation:
+
+
+Raw query failed. Code: `42703`. Message: `column r.agent_code does not exist`
+    at async getDqpOverview (src/lib/dqp/calculations.ts:271:21)
+    at async GET (src/app/api/read/dqp/overview/route.ts:34:18)
+  269 |   params.push(limit);
+  270 |
+> 271 |   const rawResult = await prisma.$queryRawUnsafe(query, ...params) as Array<{
+      |                     ^
+  272 |     source: string;
+  273 |     agent_code: string;
+  274 |     type: string; {
+  code: 'P2010',
+  clientVersion: '5.22.0',
+  meta: [Object]
+}
+ GET /api/read/dqp/overview?limit=1 500 in 277ms
+ GET /api/control/keys 403 in 947ms
+ POST /api/actions/opx/approve 403 in 912ms
+ GET /api/control/keys 200 in 688ms
+ GET /api/control/keys 403 in 886ms
+ GET /api/control/keys 403 in 13ms
+ GET /api/read/opx/list?status=proposed%27OR%271%27=%271 500 in 36ms
+ GET /api/read/whoami 200 in 666ms
+ GET /api/read/whoami 200 in 641ms
+ GET /api/read/opx/list?limit=1 500 in 20ms
+ ✓ Compiled in 64ms (194 modules)
+ ✓ Compiled in 38ms (194 modules)
+ ✓ Compiled in 49ms (194 modules)
+ ✓ Compiled in 37ms (194 modules)
+ ✓ Compiled in 50ms (194 modules)
+ ✓ Compiled /api/read/opx/plan in 247ms (392 modules)
+ GET /api/read/opx/plan?oppId=sample_opp_001 404 in 341ms
+Get execution plan error: Error [PrismaClientKnownRequestError]: 
+Invalid `prisma.$queryRaw()` invocation:
+
+
+Raw query failed. Code: `42P01`. Message: `relation "metrics" does not exist`
+    at async GET (src/app/api/read/opx/plan/route.ts:86:25)
+  84 |
+  85 |     // Get current runtime metrics
+> 86 |     const metricsRows = await prisma.$queryRaw<Array<{ key: string; value: number }>>`
+     |                         ^
+  87 |       SELECT DISTINCT ON (key) key, value::float8 AS value
+  88 |       FROM metrics
+  89 |       WHERE key IN ('ltv.current', 'hf.current', 'slippage.current', 'realyield.current', 'nav.usd') {
+  code: 'P2010',
+  clientVersion: '5.22.0',
+  meta: [Object]
+}
+ GET /api/read/opx/plan?oppId=sample_opp_001 500 in 87ms
+Get execution plan error: Error [PrismaClientKnownRequestError]: 
+Invalid `prisma.$queryRaw()` invocation:
+
+
+Raw query failed. Code: `42P01`. Message: `relation "metrics" does not exist`
+    at async GET (src/app/api/read/opx/plan/route.ts:86:25)
+  84 |
+  85 |     // Get current runtime metrics
+> 86 |     const metricsRows = await prisma.$queryRaw<Array<{ key: string; value: number }>>`
+     |                         ^
+  87 |       SELECT DISTINCT ON (key) key, value::float8 AS value
+  88 |       FROM metrics
+  89 |       WHERE key IN ('ltv.current', 'hf.current', 'slippage.current', 'realyield.current', 'nav.usd') {
+  code: 'P2010',
+  clientVersion: '5.22.0',
+  meta: [Object]
+}
+ GET /api/read/opx/plan?oppId=sample_opp_001 500 in 58ms
+ ✓ Compiled in 11ms
+ ✓ Compiled /api/read/opx/plan in 83ms (198 modules)
+ GET /api/read/opx/plan?oppId=sample_opp_001 200 in 158ms
+ ✓ Compiled /api/read/opx/plan/status in 190ms (395 modules)
+ POST /api/read/opx/plan/status 400 in 260ms
+ ✓ Compiled /api/read/opx/plan/task in 114ms (397 modules)
+ POST /api/read/opx/plan/task 200 in 176ms
+ POST /api/read/opx/plan/status 200 in 49ms
+ ✓ Compiled /api/read/opx/plan/artifact in 162ms (399 modules)
+ POST /api/read/opx/plan/artifact 201 in 226ms
+ GET /api/read/opx/plan?oppId=sample_opp_001 200 in 53ms
+ GET /api/read/opx/plan?oppId=sample_opp_001 200 in 23ms
+ ✓ Compiled in 65ms (194 modules)
+ ✓ Compiled in 37ms (194 modules)
+ ✓ Compiled in 34ms (194 modules)
+ ✓ Compiled /api/read/report/kpis in 134ms (393 modules)
+[API] Metrics table not available, using defaults
+[API] No metrics data available, returning defaults
+ GET /api/read/report/kpis 200 in 212ms
+ ✓ Compiled /api/read/report/por in 107ms (395 modules)
+[API] Metrics table not available for PoR, using defaults
+ GET /api/read/report/por 200 in 173ms
+ ✓ Compiled /api/read/report/summary in 111ms (397 modules)
+[API] Metrics table not available for summary, using synthetic data
+ GET /api/read/report/summary?range=last90d 200 in 173ms
+ ✓ Compiled in 49ms (194 modules)
+ ✓ Compiled in 68ms (194 modules)
+ ✓ Compiled in 34ms (194 modules)
+ ELIFECYCLE  Command failed.
+[?25h

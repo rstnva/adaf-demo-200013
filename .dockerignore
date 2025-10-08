@@ -1,0 +1,18 @@
+# Keep Docker build contexts lean
+# Dependencies and build output
+node_modules
+.next
+out
+build
+
+# Git & editor
+.git
+.gitignore
+.vscode
+
+# Local env and archives
+.env*
+*.tgz
+
+# OS noise
+.DS_Store

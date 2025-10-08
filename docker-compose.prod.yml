@@ -1,0 +1,466 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Primary with WAL-G
+  postgres-primary:
+    image: postgres:15-alpine
+    container_name: adaf_postgres_primary
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-adaf_dashboard}
+      POSTGRES_USER: ${POSTGRES_USER:-adaf_user}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_REPLICATION_USER: ${POSTGRES_REPLICATION_USER:-replicator}
+      POSTGRES_REPLICATION_PASSWORD_FILE: /run/secrets/postgres_replication_password
+      PGUSER: ${POSTGRES_USER:-adaf_user}
+    secrets:
+      - postgres_password
+      - postgres_replication_password
+    volumes:
+      - postgres_primary_data:/var/lib/postgresql/data
+      - ./db/init-replication.sh:/docker-entrypoint-initdb.d/01-init-replication.sh:ro
+      - ./db/postgresql.primary.conf:/etc/postgresql/postgresql.conf:ro
+      - ./db/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - wal_archive:/wal-archive
+    ports:
+      - "5432:5432"
+    command: >
+      postgres 
+      -c config_file=/etc/postgresql/postgresql.conf 
+      -c hba_file=/etc/postgresql/pg_hba.conf
+    networks:
+      - adaf_network
+    restart: unless-stopped
+    user: postgres:postgres
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run/postgresql
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-adaf_user} -d ${POSTGRES_DB:-adaf_dashboard}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # PostgreSQL Standby (Hot Replica)
+  postgres-standby:
+    image: postgres:15-alpine
+    container_name: adaf_postgres_standby
+    environment:
+      PGUSER: ${POSTGRES_USER:-adaf_user}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_REPLICATION_PASSWORD_FILE: /run/secrets/postgres_replication_password
+      PRIMARY_HOST: postgres-primary
+      PRIMARY_PORT: 5432
+      REPLICATION_USER: ${POSTGRES_REPLICATION_USER:-replicator}
+    secrets:
+      - postgres_password
+      - postgres_replication_password
+    volumes:
+      - postgres_standby_data:/var/lib/postgresql/data
+      - ./db/setup-standby.sh:/docker-entrypoint-initdb.d/setup-standby.sh:ro
+      - ./db/postgresql.standby.conf:/etc/postgresql/postgresql.conf:ro
+      - ./db/recovery.conf:/etc/postgresql/recovery.conf:ro
+    ports:
+      - "5433:5432"
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    networks:
+      - adaf_network
+    restart: unless-stopped
+    user: postgres:postgres
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run/postgresql
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-adaf_user} -h localhost"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  # WAL-G Backup Service
+  wal-g-backup:
+    image: wal-g/wal-g:latest
+    container_name: adaf_wal_g
+    environment:
+      WALG_S3_PREFIX: ${WALG_S3_PREFIX:-s3://adaf-backups/wal-g}
+      AWS_ACCESS_KEY_ID_FILE: /run/secrets/aws_access_key
+      AWS_SECRET_ACCESS_KEY_FILE: /run/secrets/aws_secret_key
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      PGHOST: postgres-primary
+      PGPORT: 5432
+      PGUSER: ${POSTGRES_USER:-adaf_user}
+      PGPASSWORD_FILE: /run/secrets/postgres_password
+      PGDATABASE: ${POSTGRES_DB:-adaf_dashboard}
+    secrets:
+      - postgres_password
+      - aws_access_key
+      - aws_secret_key
+    volumes:
+      - wal_archive:/wal-archive:ro
+      - ./db/backup-cron.sh:/backup-cron.sh:ro
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    networks:
+      - adaf_network
+    restart: unless-stopped
+    user: nobody:nogroup
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    command: ["/backup-cron.sh"]
+
+  # Redis with AOF Persistence
+  redis-primary:
+    image: redis:7-alpine
+    container_name: adaf_redis_primary
+    volumes:
+      - redis_primary_data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    ports:
+      - "6379:6379"
+    command: redis-server /usr/local/etc/redis/redis.conf
+    networks:
+      - adaf_network
+    restart: unless-stopped
+    user: redis:redis
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  # Redis Replica
+  redis-replica:
+    image: redis:7-alpine
+    container_name: adaf_redis_replica
+    volumes:
+      - redis_replica_data:/data
+      - ./redis/redis-replica.conf:/usr/local/etc/redis/redis.conf:ro
+    ports:
+      - "6380:6379"
+    command: redis-server /usr/local/etc/redis/redis.conf
+    depends_on:
+      redis-primary:
+        condition: service_healthy
+    networks:
+      - adaf_network
+    restart: unless-stopped
+    user: redis:redis
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+
+  # NGINX Load Balancer for Blue-Green
+  nginx:
+    image: nginx:alpine
+    container_name: adaf_nginx
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - app-blue
+    networks:
+      - adaf_network
+    restart: unless-stopped
+    user: nginx:nginx
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
+      - NET_BIND_SERVICE
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Application Blue Instance
+  app-blue:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+      target: production
+    container_name: adaf_app_blue
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-adaf_user}@postgres-primary:5432/${POSTGRES_DB:-adaf_dashboard}
+      REDIS_URL: redis://redis-primary:6379
+      APP_ENV: blue
+      OTEL_SERVICE_NAME: adaf-dashboard-blue
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
+    secrets:
+      - postgres_password
+      - app_secret_key
+      - jwt_secret
+    volumes:
+      - app_logs:/app/logs
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      redis-primary:
+        condition: service_healthy
+    networks:
+      - adaf_network
+    restart: unless-stopped
+    user: node:node
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/.next/cache
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health/app"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Application Green Instance (for Blue-Green deployment)
+  app-green:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+      target: production
+    container_name: adaf_app_green
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-adaf_user}@postgres-primary:5432/${POSTGRES_DB:-adaf_dashboard}
+      REDIS_URL: redis://redis-primary:6379
+      APP_ENV: green
+      OTEL_SERVICE_NAME: adaf-dashboard-green
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
+    secrets:
+      - postgres_password
+      - app_secret_key
+      - jwt_secret
+    volumes:
+      - app_logs:/app/logs
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      redis-primary:
+        condition: service_healthy
+    networks:
+      - adaf_network
+    restart: unless-stopped
+    user: node:node
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/.next/cache
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health/app"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    profiles:
+      - green-deployment
+
+  # Observability - Jaeger for OpenTelemetry
+  jaeger:
+    image: jaegertracing/all-in-one:1.50
+    container_name: adaf_jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: true
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    networks:
+      - adaf_network
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  # Prometheus for Metrics
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: adaf_prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    networks:
+      - adaf_network
+    restart: unless-stopped
+    user: nobody:nogroup
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  # Grafana for Dashboards
+  grafana:
+    image: grafana/grafana:latest
+    container_name: adaf_grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD_FILE: /run/secrets/grafana_password
+      GF_USERS_ALLOW_SIGN_UP: false
+    secrets:
+      - grafana_password
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - adaf_network
+    restart: unless-stopped
+    user: grafana:grafana
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  postgres_primary_data:
+    driver: local
+  postgres_standby_data:
+    driver: local
+  redis_primary_data:
+    driver: local
+  redis_replica_data:
+    driver: local
+  wal_archive:
+    driver: local
+  app_logs:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  adaf_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+secrets:
+  postgres_password:
+    external: true
+  postgres_replication_password:
+    external: true
+  aws_access_key:
+    external: true
+  aws_secret_key:
+    external: true
+  app_secret_key:
+    external: true
+  jwt_secret:
+    external: true
+  grafana_password:
+    external: true

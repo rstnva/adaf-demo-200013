@@ -1,0 +1,76 @@
+# Multi-stage build para optimizar tamaño y seguridad
+FROM node:18-alpine AS base
+
+# Security: Install dumb-init and security tools
+RUN apk add --no-cache libc6-compat curl dumb-init wget && \
+    rm -rf /var/cache/apk/*
+
+# Etapa de dependencias
+FROM base AS deps
+WORKDIR /app
+
+# Security: Create non-root user for build
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
+# Copiar archivos de dependencias
+COPY package.json pnpm-lock.yaml* ./
+RUN corepack enable pnpm && pnpm i --frozen-lockfile --production=false
+
+# Etapa de build
+FROM base AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+# Variables de entorno para build
+ENV NEXT_TELEMETRY_DISABLED 1
+ENV NODE_ENV production
+
+# Build de la aplicación
+RUN corepack enable pnpm && pnpm build && pnpm prune --production
+
+# Etapa de producción (Security Hardened)
+FROM base AS production
+WORKDIR /app
+
+ENV NODE_ENV production
+ENV NEXT_TELEMETRY_DISABLED 1
+ENV PORT 3000
+ENV HOSTNAME 0.0.0.0
+
+# Security: Create non-root user
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
+# Security: Create necessary directories with proper permissions
+RUN mkdir -p /app/logs /tmp && \
+    chown -R nextjs:nodejs /app /tmp
+
+# Copiar archivos necesarios con permisos seguros
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+# Copy health check script
+COPY --chown=nextjs:nodejs scripts/healthcheck.sh /app/healthcheck.sh
+RUN chmod +x /app/healthcheck.sh
+
+# Security: Switch to non-root user BEFORE exposing port
+USER nextjs
+
+# Expose port
+EXPOSE 3000
+
+# Environment variables
+ENV HOSTNAME="0.0.0.0"
+
+# Health check with proper error handling  
+HEALTHCHECK --interval=15s --timeout=10s --start-period=30s --retries=3 \
+    CMD /app/healthcheck.sh || exit 1
+
+# Security: Use dumb-init as PID 1 for proper signal handling
+ENTRYPOINT ["dumb-init", "--"]
+
+# Start application
+CMD ["node", "server.js"]

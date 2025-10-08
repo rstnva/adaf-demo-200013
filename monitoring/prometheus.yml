@@ -1,0 +1,107 @@
+# Prometheus Configuration for ADAF Dashboard
+# Metrics collection and alerting
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'adaf-production'
+    replica: 'prometheus-1'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+# Load alerting rules
+rule_files:
+  - "alerts/*.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # ADAF Dashboard Application (Blue-Green)
+  - job_name: 'adaf-app-blue'
+    scrape_interval: 10s
+    metrics_path: '/api/metrics'
+    static_configs:
+      - targets: ['app-blue:3000']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'app-blue'
+      - target_label: app_env
+        replacement: 'blue'
+
+  - job_name: 'adaf-app-green'
+    scrape_interval: 10s
+    metrics_path: '/api/metrics'
+    static_configs:
+      - targets: ['app-green:3000']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'app-green'
+      - target_label: app_env
+        replacement: 'green'
+
+  # PostgreSQL Metrics (Primary)
+  - job_name: 'postgres-primary'
+    static_configs:
+      - targets: ['postgres-exporter-primary:9187']
+    relabel_configs:
+      - target_label: postgres_role
+        replacement: 'primary'
+
+  # PostgreSQL Metrics (Standby)
+  - job_name: 'postgres-standby'
+    static_configs:
+      - targets: ['postgres-exporter-standby:9187']
+    relabel_configs:
+      - target_label: postgres_role
+        replacement: 'standby'
+
+  # Redis Metrics (Primary)
+  - job_name: 'redis-primary'
+    static_configs:
+      - targets: ['redis-exporter-primary:9121']
+    relabel_configs:
+      - target_label: redis_role
+        replacement: 'primary'
+
+  # Redis Metrics (Replica)
+  - job_name: 'redis-replica'
+    static_configs:
+      - targets: ['redis-exporter-replica:9121']
+    relabel_configs:
+      - target_label: redis_role
+        replacement: 'replica'
+
+  # NGINX Metrics
+  - job_name: 'nginx'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['nginx-exporter:9113']
+
+  # Node Exporter (System metrics)
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # Health Check Endpoints
+  - job_name: 'adaf-health-checks'
+    scrape_interval: 30s
+    metrics_path: '/api/health/app'
+    static_configs:
+      - targets: ['app-blue:3000', 'app-green:3000']
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'up'
+        target_label: health_check
+        replacement: 'application'

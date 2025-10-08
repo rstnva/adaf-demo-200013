@@ -1,0 +1,286 @@
+# ================================================================================================
+# ADAF Dashboard Prometheus Alerting Rules
+# ================================================================================================
+# Production alerting rules for monitoring ADAF Dashboard health and performance
+# Covers API performance, worker health, data quality, and business metrics
+# ================================================================================================
+
+groups:
+  # =============================================================================
+  # API Performance and Availability Alerts
+  # =============================================================================
+  - name: adaf_api_alerts
+    interval: 30s
+    rules:
+      # High error rate alert
+      - alert: HighAPIErrorRate
+    expr: rate(adaf_api_requests_total{status=~"5.."}[5m]) / rate(adaf_api_requests_total[5m]) > 0.01
+    for: 5m
+    labels:
+      severity: critical
+      component: api
+    annotations:
+      summary: "High API 5xx error rate detected"
+      description: "API error rate is {{ $value | humanizePercentage }} (threshold: 1%)"
+      runbook_url: "https://github.com/your-org/adaf-dashboard-pro/blob/main/docs/runbooks/ALERT_API_5XX.md"
+
+      # API latency alert
+      - alert: HighAPILatency
+        expr: |
+          histogram_quantile(0.95, 
+            sum(rate(adaf_api_request_duration_seconds_bucket[5m])) by (route, le)
+          ) > 2.0
+        for: 3m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High API latency detected"
+          description: "API route {{ $labels.route }} 95th percentile latency is {{ $value }}s"
+
+      # Rate limiting threshold alert
+      - alert: HighRateLimitBlocks
+        expr: |
+          increase(adaf_rate_limit_block_total[10m]) > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: rate_limiter
+        annotations:
+          summary: "High number of rate limit blocks"
+          description: "{{ $value }} requests blocked by rate limiting in the last 10 minutes for route {{ $labels.route }}"
+
+  # =============================================================================
+  # Worker and Agent Health Alerts
+  # =============================================================================
+  - name: adaf_worker_alerts
+    interval: 60s
+    rules:
+      # Worker tick delay alert
+      - alert: WorkerTickDelay
+        expr: |
+          (time() - adaf_worker_last_tick_timestamp) > 120
+        for: 2m
+        labels:
+          severity: warning
+          component: worker
+          runbook: "https://docs.adaf.com/runbooks/worker-delay"
+        annotations:
+          summary: "Worker tick delay detected"
+          description: "Worker {{ $labels.worker }} last tick was {{ $value }}s ago"
+          runbook_url: "https://github.com/your-org/adaf-dashboard-pro/blob/main/docs/runbooks/ALERT_WORKER_LAG.md"
+
+      # Critical worker delay
+      - alert: CriticalWorkerDelay
+        expr: |
+          (time() - adaf_worker_last_tick_timestamp) > 300
+        for: 5m
+        labels:
+          severity: critical
+          component: worker
+        annotations:
+          summary: "CRITICAL: Worker not responding"
+          description: "Worker {{ $labels.worker }} has not ticked for {{ $value }}s"
+          runbook_url: "https://github.com/your-org/adaf-dashboard-pro/blob/main/docs/runbooks/ALERT_WORKER_LAG.md"
+
+      # Agent execution failures
+      - alert: AgentExecutionFailures
+        expr: |
+          increase(adaf_agent_executions_total{status="failed"}[15m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: agents
+        annotations:
+          summary: "High agent execution failure rate"
+          description: "Agent {{ $labels.agent }} has {{ $value }} failures in the last 15 minutes"
+
+  # =============================================================================
+  # Data Quality and Freshness Alerts
+  # =============================================================================
+  - name: adaf_dqp_alerts
+    interval: 120s
+    rules:
+      # Data freshness alert
+      - alert: DataFreshnessIssue
+        expr: |
+          (time() - adaf_data_source_last_update_timestamp) > 7200
+        for: 10m
+        labels:
+          severity: warning
+          component: dqp
+          runbook: "https://docs.adaf.com/runbooks/data-freshness"
+        annotations:
+          summary: "Data source freshness issue"
+          description: "Data source {{ $labels.source }} has not updated for {{ $value }}s"
+
+      # Critical data staleness
+      - alert: CriticalDataStaleness
+        expr: |
+          (time() - adaf_data_source_last_update_timestamp{source=~"etf_flows|onchain_tvl|derivs_funding"}) > 14400
+        for: 30m
+        labels:
+          severity: critical
+          component: dqp
+        annotations:
+          summary: "CRITICAL: Critical data source stale"
+          description: "Critical data source {{ $labels.source }} has not updated for {{ $value }}s"
+
+      # DQP incidents alert
+      - alert: DQPIncidentsRising
+        expr: |
+          increase(adaf_dqp_incidents_total[1h]) > 3
+        for: 10m
+        labels:
+          severity: warning
+          component: dqp
+        annotations:
+          summary: "Rising DQP incidents"
+          description: "{{ $value }} DQP incidents in the last hour for source {{ $labels.source }}"
+
+  # =============================================================================
+  # Business Logic and Backtest Alerts
+  # =============================================================================
+  - name: adaf_business_alerts
+    interval: 60s
+    rules:
+      # Backtest failure alert
+      - alert: BacktestFailures
+        expr: |
+          increase(adaf_backtests_total{status="failed"}[10m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+          component: research
+        annotations:
+          summary: "Backtest execution failures detected"
+          description: "{{ $value }} backtests failed in the last 10 minutes"
+
+      # Report generation failures
+      - alert: ReportGenerationFailures
+        expr: |
+          increase(adaf_reports_generated_total{status="failed"}[1h]) > 2
+        for: 15m
+        labels:
+          severity: warning
+          component: reports
+        annotations:
+          summary: "Report generation failures"
+          description: "{{ $value }} report generation failures in the last hour"
+
+      # OP-X triage backlog alert
+      - alert: OpxTriageBacklog
+        expr: |
+          adaf_opx_opportunities_total{status="proposed"} > 50
+        for: 30m
+        labels:
+          severity: warning
+          component: opx
+        annotations:
+          summary: "High OP-X triage backlog"
+          description: "{{ $value }} opportunities in proposed status requiring triage"
+
+  # =============================================================================
+  # System Resource and Infrastructure Alerts
+  # =============================================================================
+  - name: adaf_infrastructure_alerts
+    interval: 60s
+    rules:
+      # High memory usage
+      - alert: HighMemoryUsage
+        expr: |
+          (adaf_system_memory_usage_bytes / (1024^3)) > 8
+        for: 10m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High memory usage detected"
+          description: "System memory usage is {{ $value }}GB"
+
+      # Database connection issues
+      - alert: DatabaseConnectionIssues
+        expr: |
+          adaf_database_connections_active > adaf_database_connections_max * 0.9
+        for: 5m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "Database connection pool nearly exhausted"
+          description: "Active connections: {{ $value }}, Max: {{ adaf_database_connections_max }}"
+
+      # Disk space alert
+      - alert: LowDiskSpace
+        expr: |
+          (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) < 0.1
+        for: 15m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "Low disk space on root filesystem"
+          description: "Root filesystem has less than 10% available space remaining"
+
+  # =============================================================================
+  # Security and Compliance Alerts
+  # =============================================================================
+  - name: adaf_security_alerts
+    interval: 30s
+    rules:
+      # Unusual rate limit activity
+      - alert: UnusualRateLimitActivity
+        expr: |
+          increase(adaf_rate_limit_block_total[5m]) > 1000
+        for: 2m
+        labels:
+          severity: critical
+          component: security
+        annotations:
+          summary: "Unusual rate limiting activity detected"
+          description: "{{ $value }} rate limit blocks in 5 minutes - possible attack"
+
+      # CSP violations spike
+      - alert: CSPViolationsSpike
+        expr: |
+          increase(adaf_csp_violations_total[10m]) > 50
+        for: 5m
+        labels:
+          severity: warning
+          component: security
+        annotations:
+          summary: "Content Security Policy violations spike"
+          description: "{{ $value }} CSP violations in the last 10 minutes"
+
+      # Authentication failures
+      - alert: AuthenticationFailures
+        expr: |
+          increase(adaf_auth_failures_total[15m]) > 20
+        for: 5m
+        labels:
+          severity: warning
+          component: security
+        annotations:
+          summary: "High authentication failure rate"
+          description: "{{ $value }} authentication failures in the last 15 minutes"
+
+# =============================================================================
+# Alert Routing and Notification Configuration
+# =============================================================================
+# This section would be used in conjunction with Alertmanager configuration
+# to route alerts to appropriate channels (Slack, email, PagerDuty, etc.)
+
+# Example Alertmanager routing (not part of this file):
+# route:
+#   group_by: ['alertname', 'severity']
+#   group_wait: 30s
+#   group_interval: 5m
+#   repeat_interval: 12h
+#   receiver: 'slack-adaf-alerts'
+#   routes:
+#     - match:
+#         severity: critical
+#       receiver: 'slack-critical'
+#     - match:
+#         component: dqp
+#       receiver: 'slack-dqp-team'

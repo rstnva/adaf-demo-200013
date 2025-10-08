@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "src/lib/wsp/**/*.ts",
+    "src/components/dashboard/wsp/**/*.ts",
+    "src/components/dashboard/wsp/**/*.tsx",
+    "src/app/api/wsp/**/*.ts",
+    "src/metrics/wsp.metrics.ts",
+    "src/contexts/RBACContext.tsx",
+    "src/types/**/*.d.ts"
+  ],
+  "exclude": [
+    "src/app/api/learn/**",
+    "src/lib/cache/redis-config.ts",
+    "node_modules"
+  ]
+}

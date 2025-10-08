@@ -1,0 +1,15 @@
+name: k6 Perf (manual)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  k6-perf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: grafana/setup-k6-action@v1
+      - name: Run k6 smoke/perf
+        run: |
+          echo 'import http from "k6/http"; export default function(){ http.get("https://example.com"); }' > perf.wsp.js
+          k6 run perf.wsp.js

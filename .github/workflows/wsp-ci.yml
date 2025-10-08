@@ -1,0 +1,33 @@
+name: WSP CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  wsp-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Enable corepack (pnpm)
+        run: corepack enable
+      - name: Install deps
+        run: pnpm install --frozen-lockfile || pnpm install
+      - name: Generate Prisma client
+        run: pnpm run --if-present db:generate
+      - name: Typecheck (WSP)
+        run: pnpm run --if-present typecheck
+      - name: Unit tests (Vitest) with coverage
+        run: pnpm run --if-present test:coverage
+      - name: Enforce coverage thresholds
+        run: |
+          node -e "const fs=require('fs');const p='coverage/coverage-final.json';if(!fs.existsSync(p)){console.error('Missing coverage file');process.exit(1)};const c=require('./coverage/coverage-final.json');const s=c.total?.statements?.pct||0, b=c.total?.branches?.pct||0; if(s<75||b<70){console.error('Coverage too low', {statements:s, branches:b}); process.exit(1)}; console.log('Coverage OK', {statements:s, branches:b});"
+      - name: Install Playwright deps
+        run: npx playwright install --with-deps || true
+      - name: Playwright E2E
+        run: pnpm run --if-present test:e2e

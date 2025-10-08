@@ -1,0 +1,86 @@
+name: Auto Deploy ADAF Program
+
+# Se ejecuta cuando se hace push a main con cambios en project-data/
+on:
+  push:
+    branches: [ main ]
+    paths: 
+      - 'project-data/**'
+      - 'scripts/bootstrap-project.sh'
+  workflow_dispatch:
+    inputs:
+      target_repo:
+        description: 'Target repository (owner/name)'
+        required: true
+        type: string
+      force_recreate:
+        description: 'Force recreate all issues and milestones'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  auto-deploy:
+    name: Deploy ADAF Program Structure
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      issues: write
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup GitHub CLI
+        run: |
+          gh auth status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq rsync
+          
+      - name: Determine target repository
+        id: target
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "repo=${{ inputs.target_repo }}" >> $GITHUB_OUTPUT
+          else
+            echo "repo=${{ github.repository }}" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: Bootstrap project structure
+        run: |
+          chmod +x scripts/bootstrap-project.sh
+          ./scripts/bootstrap-project.sh "${{ steps.target.outputs.repo }}" || true
+          chmod +x scripts/create-issues.sh  
+          ./scripts/create-issues.sh "${{ steps.target.outputs.repo }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Validate deployment
+        run: |
+          echo "🎯 Validando deployment en ${{ steps.target.outputs.repo }}"
+          gh issue list --repo "${{ steps.target.outputs.repo }}" --limit 5
+          gh run list --repo "${{ steps.target.outputs.repo }}" --limit 3
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Summary
+        run: |
+          echo "## 🎉 ADAF v0.9 Program Deployed Successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY  
+          echo "**Target Repository:** [${{ steps.target.outputs.repo }}](https://github.com/${{ steps.target.outputs.repo }})" >> $GITHUB_STEP_SUMMARY
+          echo "**Issues Created:** $(gh issue list --repo '${{ steps.target.outputs.repo }}' --json number | jq length)" >> $GITHUB_STEP_SUMMARY
+          echo "**Milestones:** 5 (M1-M5, 8-week program)" >> $GITHUB_STEP_SUMMARY
+          echo "**Labels:** 11 specialized labels" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Next Steps:" >> $GITHUB_STEP_SUMMARY
+          echo "1. Review and assign issues in [GitHub Issues](https://github.com/${{ steps.target.outputs.repo }}/issues)" >> $GITHUB_STEP_SUMMARY
+          echo "2. Monitor CI/CD workflows in [Actions](https://github.com/${{ steps.target.outputs.repo }}/actions)" >> $GITHUB_STEP_SUMMARY
+          echo "3. Follow milestone progression M1→M2→M3→M4→M5" >> $GITHUB_STEP_SUMMARY
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

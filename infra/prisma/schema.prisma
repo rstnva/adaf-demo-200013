@@ -1,0 +1,163 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Source {
+  id      String      @id @default(cuid())
+  code    String      @unique
+  kind    SourceKind
+  name    String
+  url     String?
+  enabled Boolean     @default(true)
+  signals Signal[]
+
+  @@map("sources")
+}
+
+model Agent {
+  id           String        @id @default(cuid())
+  code         String        @unique
+  name         String
+  category     AgentCategory
+  description  String?
+  enabled      Boolean       @default(true)
+  createdAt    DateTime      @default(now()) @map("created_at")
+  signals      Signal[]
+  rules        Rule[]
+  opportunities Opportunity[]
+
+  @@map("agents")
+}
+
+model Signal {
+  id        String       @id @default(cuid())
+  agentId   String       @map("agent_id")
+  sourceId  String?      @map("source_id")
+  ts        DateTime     @db.Timestamptz(6)
+  severity  Severity
+  kind      String
+  payload   Json
+  hash      String       @unique
+  status    SignalStatus @default(new)
+  createdAt DateTime     @default(now()) @map("created_at")
+
+  agent  Agent   @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  source Source? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  alerts Alert[]
+
+  @@index([hash])
+  @@index([agentId, ts(sort: Desc)])
+  @@index([status, createdAt])
+  @@map("signals")
+}
+
+model Metric {
+  id    String   @id @default(cuid())
+  key   String
+  ts    DateTime @db.Timestamptz(6)
+  value Decimal  @db.Decimal(20, 8)
+  meta  Json?
+
+  @@index([key, ts(sort: Desc)])
+  @@map("metrics")
+}
+
+model Alert {
+  id           String   @id @default(cuid())
+  signalId     String   @map("signal_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+  title        String
+  message      String
+  acknowledged Boolean  @default(false)
+
+  signal Signal @relation(fields: [signalId], references: [id], onDelete: Cascade)
+
+  @@index([acknowledged, createdAt(sort: Desc)])
+  @@map("alerts")
+}
+
+model Rule {
+  id        String   @id @default(cuid())
+  agentId   String   @map("agent_id")
+  name      String
+  expr      String
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@map("rules")
+}
+
+model Limit {
+  id    String  @id @default(cuid())
+  key   String  @unique
+  value Decimal @db.Decimal(10, 6)
+  notes String?
+
+  @@map("limits")
+}
+
+model Opportunity {
+  id        String            @id @default(cuid())
+  createdAt DateTime          @default(now()) @map("created_at")
+  agentId   String            @map("agent_id")
+  thesis    String
+  risks     Json
+  sizing    Json
+  var       Decimal           @db.Decimal(10, 6)
+  type      OpportunityType
+  status    OpportunityStatus @default(proposed)
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@map("opportunities")
+}
+
+enum SourceKind {
+  news
+  onchain
+  offchain
+  derivs
+  metrics
+}
+
+enum AgentCategory {
+  NM
+  OC
+  OF
+  DV
+  MX
+  OP
+}
+
+enum Severity {
+  low
+  med
+  high
+}
+
+enum SignalStatus {
+  new
+  validated
+  rejected
+}
+
+enum OpportunityType {
+  beta
+  basis
+  realYield
+  arb
+}
+
+enum OpportunityStatus {
+  proposed
+  approved
+  rejected
+}

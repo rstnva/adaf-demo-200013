@@ -1,0 +1,233 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Primary with WAL-G
+  postgres-primary:
+    image: postgres:15-alpine
+    container_name: adaf_postgres_primary
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-adaf_dashboard}
+      POSTGRES_USER: ${POSTGRES_USER:-adaf_user}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_REPLICATION_USER: ${POSTGRES_REPLICATION_USER:-replicator}
+      POSTGRES_REPLICATION_PASSWORD_FILE: /run/secrets/postgres_replication_password
+      PGUSER: ${POSTGRES_USER:-adaf_user}
+    secrets:
+      - postgres_password
+      - postgres_replication_password
+    volumes:
+      - postgres_primary_data:/var/lib/postgresql/data
+      - ./db/init-replication.sh:/docker-entrypoint-initdb.d/01-init-replication.sh:ro
+      - ./db/postgresql.primary.conf:/etc/postgresql/postgresql.conf:ro
+      - ./db/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - wal_archive:/wal-archive
+    ports:
+      - "5432:5432"
+    command: >
+      postgres 
+      -c config_file=/etc/postgresql/postgresql.conf 
+      -c hba_file=/etc/postgresql/pg_hba.conf
+    networks:
+      - adaf_network
+    restart: unless-stopped
+    user: postgres:postgres
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run/postgresql
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-adaf_user} -d ${POSTGRES_DB:-adaf_dashboard}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # PostgreSQL Standby (Hot Replica)
+  postgres-standby:
+    image: postgres:15-alpine
+    container_name: adaf_postgres_standby
+    environment:
+      PGUSER: ${POSTGRES_USER:-adaf_user}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_REPLICATION_PASSWORD_FILE: /run/secrets/postgres_replication_password
+      PRIMARY_HOST: postgres-primary
+      PRIMARY_PORT: 5432
+      REPLICATION_USER: ${POSTGRES_REPLICATION_USER:-replicator}
+    secrets:
+      - postgres_password
+      - postgres_replication_password
+    volumes:
+      - postgres_standby_data:/var/lib/postgresql/data
+      - ./db/setup-standby.sh:/docker-entrypoint-initdb.d/setup-standby.sh:ro
+      - ./db/postgresql.standby.conf:/etc/postgresql/postgresql.conf:ro
+      - ./db/recovery.conf:/etc/postgresql/recovery.conf:ro
+    ports:
+      - "5433:5432"
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    networks:
+      - adaf_network
+    restart: unless-stopped
+    user: postgres:postgres
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run/postgresql
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-adaf_user} -h localhost"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  # Redis with AOF Persistence
+  redis-primary:
+    image: redis:7-alpine
+    container_name: adaf_redis_primary
+    volumes:
+      - redis_primary_data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    ports:
+      - "6379:6379"
+    command: redis-server /usr/local/etc/redis/redis.conf
+    networks:
+      - adaf_network
+    restart: unless-stopped
+    user: redis:redis
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  # NGINX Load Balancer for Blue-Green
+  nginx:
+    image: nginx:alpine
+    container_name: adaf_nginx
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - app-blue
+    networks:
+      - adaf_network
+    restart: unless-stopped
+    user: nginx:nginx
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
+      - NET_BIND_SERVICE
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Application Blue Instance
+  app-blue:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    container_name: adaf-dashboard
+    environment:
+      DATABASE_URL: postgresql://adaf_user:${POSTGRES_PASSWORD:-adaf_secure_password_2024}@postgres:5432/adaf_dashboard
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: production
+      NEXT_PUBLIC_APP_ENV: production
+    ports:
+      - "3005:3005"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3005/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+
+  # Nginx como proxy reverso y load balancer
+  nginx:
+    image: nginx:alpine
+    container_name: adaf-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/ssl/certs
+    depends_on:
+      - app
+    restart: always
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local

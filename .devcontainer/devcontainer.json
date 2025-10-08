@@ -1,0 +1,17 @@
+{
+  "name": "adaf-dashboard-pro",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-20-bullseye",
+  "remoteUser": "node",
+  "postCreateCommand": "corepack enable && (pnpm --version || npm i -g pnpm)",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint",
+        "bradlc.vscode-tailwindcss"
+      ],
+      "settings": { "editor.formatOnSave": true }
+    }
+  },
+  "runArgs": ["--cap-drop=ALL","--security-opt=no-new-privileges","--pids-limit=512"]
+}
